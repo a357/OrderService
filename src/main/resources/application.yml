@@ -1,0 +1,33 @@
+server:
+  port: 0
+  error:  #spring-boot-starter-validation
+    include-message: always
+    include-binding-errors: always
+
+
+spring:
+  application.name: order-server
+  datasource:
+    url: jdbc:h2:file:./OrderService/src/main/resources/db/orders;AUTO_SERVER=true
+    username: cba
+    password: 1
+    driver-class-name: org.h2.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate.ddl-auto: update
+  h2.console:
+    enabled: true
+    settings.web-allow-others: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka #Now this configuration is needed to configure Eureka client to register with Eureka server.
+  instance:
+    instance-id: ${spring.application.name}:${instanceId:${random.value}}
+
+
+axon:
+  eventhandling:
+    processors:
+      order-group.mode: subscribing # event handler @ProcessingGroup("product-group") Groups.PRODUCT_GROUP
