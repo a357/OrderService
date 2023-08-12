@@ -15,10 +15,10 @@ import com.appdeveloperblog.estore.orderservice.core.events.OrderCreatedEvent;
 import com.appdeveloperblog.estore.orderservice.core.events.OrderRejectEvent;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.deadline.DeadlineManager;
+import org.axonframework.deadline.annotation.DeadlineHandler;
 import org.axonframework.messaging.responsetypes.ResponseTypes;
 import org.axonframework.modelling.saga.EndSaga;
 import org.axonframework.modelling.saga.SagaEventHandler;
-import org.axonframework.modelling.saga.SagaLifecycle;
 import org.axonframework.modelling.saga.StartSaga;
 import org.axonframework.queryhandling.QueryGateway;
 import org.axonframework.spring.stereotype.Saga;
@@ -29,15 +29,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 @Saga
 public class OrderSaga {
     private static final String ASSOCIATION_PROPERTIES = "orderId";
+    private static final String DEADLINE_NAME_PAYMENT_PROCESSING = "payment-processing-deadline";
     @Autowired
     private transient CommandGateway commandGateway;
     @Autowired
     private transient QueryGateway queryGateway;
+    @Autowired
+    private transient DeadlineManager deadlineSchedule;
+    private String scheduleId;
 
     private final Logger LOGGER = LoggerFactory.getLogger(OrderSaga.class);
 
@@ -91,15 +94,37 @@ public class OrderSaga {
 
         LOGGER.info(String.format("Successfully fetch user payment details for user %s", userPaymentDetails.getFirstName()));
 
+        /*
+        * TODO DEADLINE START
+        * if the payment processing didn't complete in 10 sec. program will expect a different event to be triggered
+        *
+        * but if the payment processing did complete on time and the PaymentProcessedEvent did get called, then
+        * I  can cancel this deadline for the same saga class
+        * */
+        scheduleId = deadlineSchedule.schedule(Duration.of(10, ChronoUnit.SECONDS),
+                DEADLINE_NAME_PAYMENT_PROCESSING, productReservedEvents);
+
+
+        /*
+         * TODO DEADLINE TRIGGER
+         * I will introduce a bug in my code, and I will not even send the payment processing command.
+         * So to guarantee that the payment processing command does not send,
+         *
+         * this will guarantee that the command is not sent. And the next event in the order saga flow will not get triggered.
+         * And this will make my schedule deadline trigger in 10 seconds.
+         * */
+        if(true) return;
+
         ProcessPaymentCommand processPaymentCommand = ProcessPaymentCommand.builder()
                 .orderId(productReservedEvents.getOrderId())
                 .paymentId(UUID.randomUUID().toString())
                 .paymentDetails(userPaymentDetails.getPaymentDetails())
                 .build();
 
+
         String result = null;
         try {
-            result = commandGateway.sendAndWait(processPaymentCommand, 10, TimeUnit.SECONDS);
+            result = commandGateway.sendAndWait(processPaymentCommand);
         } catch (Exception ex) {
             LOGGER.error(ex.getMessage());
             cancelProductReservation(productReservedEvents, ex.getMessage());
@@ -115,6 +140,13 @@ public class OrderSaga {
 
     @SagaEventHandler(associationProperty = ASSOCIATION_PROPERTIES)
     public void handle(PaymentProcessedEvent paymentProcessedEvent) {
+        /*
+        * TODO DEADLINE CANCEL
+        * So if the payment processing is successful and this PaymentProcessedEvent did get called,
+        * then I need to cancel the scheduled deadline.
+        * */
+        cancelDeadline();
+
         commandGateway.send(new ApproveOrderCommand(paymentProcessedEvent.getOrderId()));// 1
     }
 
@@ -142,7 +174,15 @@ public class OrderSaga {
         LOGGER.info("Successfully rejected order with id:" + orderRejectEvent.getOrderId());
     }
 
+    @DeadlineHandler(deadlineName = DEADLINE_NAME_PAYMENT_PROCESSING)
+    public void handlePaymentDeadline(ProductReservedEvents productReservedEvents) {
+        LOGGER.info("Payment processing deadline took place. Sending a compensation command to cancel the product reservation");
+        cancelProductReservation(productReservedEvents, "payment timeout");
+    }
+
     private void cancelProductReservation(ProductReservedEvents productReservedEvents, String reason) {
+        cancelDeadline();
+
         var cancelProductReservationCommand = CancelProductReservationCommand.builder()
                 .orderId(productReservedEvents.getOrderId())
                 .productId(productReservedEvents.getProductId())
@@ -152,5 +192,12 @@ public class OrderSaga {
                 .build();
 
         commandGateway.send(cancelProductReservationCommand);
+    }
+
+    private void cancelDeadline() {
+        if (scheduleId != null) {
+            deadlineSchedule.cancelAll(DEADLINE_NAME_PAYMENT_PROCESSING);
+            scheduleId = null;
+        }
     }
 }
