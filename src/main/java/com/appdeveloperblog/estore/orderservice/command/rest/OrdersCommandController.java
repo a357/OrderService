@@ -3,12 +3,8 @@ package com.appdeveloperblog.estore.orderservice.command.rest;
 import com.appdeveloperblog.estore.orderservice.command.commands.CreateOrderCommand;
 import com.appdeveloperblog.estore.orderservice.core.OrderSummary;
 import com.appdeveloperblog.estore.orderservice.query.FindOrderQuery;
-import io.axoniq.axonserver.connector.query.SubscriptionQueryResult;
 import jakarta.validation.Valid;
 import org.axonframework.commandhandling.gateway.CommandGateway;
-import static org.axonframework.messaging.responsetypes.ResponseTypes.*;
-
-import org.axonframework.messaging.responsetypes.ResponseType;
 import org.axonframework.queryhandling.QueryGateway;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
+
+import static org.axonframework.messaging.responsetypes.ResponseTypes.instanceOf;
 
 @RestController
 @RequestMapping("/orders")
