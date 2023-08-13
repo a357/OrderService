@@ -10,9 +10,12 @@ import com.appdeveloperblog.estore.core.model.User;
 import com.appdeveloperblog.estore.core.query.FetchUserPaymentDetailsQuery;
 import com.appdeveloperblog.estore.orderservice.command.commands.ApproveOrderCommand;
 import com.appdeveloperblog.estore.orderservice.command.commands.RejectOrderCommand;
+import com.appdeveloperblog.estore.orderservice.core.OrderSummary;
 import com.appdeveloperblog.estore.orderservice.core.events.OrderApprovedEvent;
 import com.appdeveloperblog.estore.orderservice.core.events.OrderCreatedEvent;
 import com.appdeveloperblog.estore.orderservice.core.events.OrderRejectEvent;
+import com.appdeveloperblog.estore.orderservice.query.FindOrderQuery;
+import org.apache.logging.log4j.util.Strings;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.deadline.DeadlineManager;
 import org.axonframework.deadline.annotation.DeadlineHandler;
@@ -21,6 +24,7 @@ import org.axonframework.modelling.saga.EndSaga;
 import org.axonframework.modelling.saga.SagaEventHandler;
 import org.axonframework.modelling.saga.StartSaga;
 import org.axonframework.queryhandling.QueryGateway;
+import org.axonframework.queryhandling.QueryUpdateEmitter;
 import org.axonframework.spring.stereotype.Saga;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +44,8 @@ public class OrderSaga {
     private transient QueryGateway queryGateway;
     @Autowired
     private transient DeadlineManager deadlineSchedule;
+    @Autowired
+    private transient QueryUpdateEmitter queryUpdateEmitter;
     private String scheduleId;
 
     private final Logger LOGGER = LoggerFactory.getLogger(OrderSaga.class);
@@ -101,26 +107,14 @@ public class OrderSaga {
         * but if the payment processing did complete on time and the PaymentProcessedEvent did get called, then
         * I  can cancel this deadline for the same saga class
         * */
-        scheduleId = deadlineSchedule.schedule(Duration.of(10, ChronoUnit.SECONDS),
+        scheduleId = deadlineSchedule.schedule(Duration.of(120, ChronoUnit.SECONDS),
                 DEADLINE_NAME_PAYMENT_PROCESSING, productReservedEvents);
-
-
-        /*
-         * TODO DEADLINE TRIGGER
-         * I will introduce a bug in my code, and I will not even send the payment processing command.
-         * So to guarantee that the payment processing command does not send,
-         *
-         * this will guarantee that the command is not sent. And the next event in the order saga flow will not get triggered.
-         * And this will make my schedule deadline trigger in 10 seconds.
-         * */
-        if(true) return;
 
         ProcessPaymentCommand processPaymentCommand = ProcessPaymentCommand.builder()
                 .orderId(productReservedEvents.getOrderId())
                 .paymentId(UUID.randomUUID().toString())
                 .paymentDetails(userPaymentDetails.getPaymentDetails())
                 .build();
-
 
         String result = null;
         try {
@@ -155,6 +149,9 @@ public class OrderSaga {
     public void handle(OrderApprovedEvent orderApprovedEvent) {
         LOGGER.info("Order is approved. Order with id: " + orderApprovedEvent.getOrderId());//3
 
+        queryUpdateEmitter.emit(FindOrderQuery.class, query -> true,
+                new OrderSummary(orderApprovedEvent.getOrderId(), orderApprovedEvent.getStatus(), Strings.EMPTY));
+
         // we use @EndSaga or programatically SagaLIfecycle.end() if we need call it depend on condition
         // after that Saga don't accept new event
         //SagaLifecycle.end();
@@ -172,6 +169,9 @@ public class OrderSaga {
     @SagaEventHandler(associationProperty = ASSOCIATION_PROPERTIES)
     public void handle(OrderRejectEvent orderRejectEvent) {
         LOGGER.info("Successfully rejected order with id:" + orderRejectEvent.getOrderId());
+
+        queryUpdateEmitter.emit(FindOrderQuery.class, query -> true,
+                new OrderSummary(orderRejectEvent.getOrderId(), orderRejectEvent.getStatus(), orderRejectEvent.getReason()));
     }
 
     @DeadlineHandler(deadlineName = DEADLINE_NAME_PAYMENT_PROCESSING)

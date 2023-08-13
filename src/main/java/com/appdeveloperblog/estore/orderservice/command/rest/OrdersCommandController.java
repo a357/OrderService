@@ -1,8 +1,15 @@
 package com.appdeveloperblog.estore.orderservice.command.rest;
 
 import com.appdeveloperblog.estore.orderservice.command.commands.CreateOrderCommand;
+import com.appdeveloperblog.estore.orderservice.core.OrderSummary;
+import com.appdeveloperblog.estore.orderservice.query.FindOrderQuery;
+import io.axoniq.axonserver.connector.query.SubscriptionQueryResult;
 import jakarta.validation.Valid;
 import org.axonframework.commandhandling.gateway.CommandGateway;
+import static org.axonframework.messaging.responsetypes.ResponseTypes.*;
+
+import org.axonframework.messaging.responsetypes.ResponseType;
+import org.axonframework.queryhandling.QueryGateway;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,10 +26,15 @@ public class OrdersCommandController {
     @Autowired
     private CommandGateway commandGateway;
 
+    @Autowired
+    private QueryGateway queryGateway;
+
     @PostMapping
-    public String create(@Valid @RequestBody CreateOrderRestModel model) {
+    public OrderSummary create(@Valid @RequestBody CreateOrderRestModel model) {
+
+        String orderId = UUID.randomUUID().toString();
         var createOrderCommand = CreateOrderCommand.builder()
-                .orderId(UUID.randomUUID().toString())
+                .orderId(orderId)
                 .userId(USER_ID)
                 .productId(model.getProductId())
                 .quantity(model.getQuantity())
@@ -30,10 +42,18 @@ public class OrdersCommandController {
                 .orderStatus(null)
                 .build();
 
+
+
         /**
          * use interceptor for check if such orderAlreadyExists
          * @links com.appdeveloperblog.estore.orderservice.orderservice.command.rest.interceptor.CreateOrderCommandInterceptor
          * */
-        return commandGateway.sendAndWait(createOrderCommand);
+
+        var responseType = instanceOf(OrderSummary.class);
+        var query = new FindOrderQuery(orderId);
+        try (var queryResult = queryGateway.subscriptionQuery(query, responseType, responseType)) {
+            commandGateway.sendAndWait(createOrderCommand);
+            return queryResult.updates().blockFirst();
+        }
     }
 }
